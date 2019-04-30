@@ -98,12 +98,22 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	}
 	if !isClusterFound {
 		log.Printf("Adding new service %s to envoy Cluster config", serviceConfig.ContainerID)
-		newCluster, err := r.buildEnvoyClusterConfig(serviceConfig)
+		newCluster, err := r.buildEnvoyClusterConfigWithIP(serviceConfig)
 		if err != nil {
 			log.Println("Error while creating Envoy Cluster Config:", err)
 			return err
 		}
 		envoyConfig.Clusters = append(envoyConfig.Clusters, *newCluster)
+
+		if env:= getValueFromTag(serviceConfig.Tags,"consul.register/hostname") ; env != "" {
+			newClusterWithHostName, err := r.buildEnvoyClusterConfigWithHostName(serviceConfig)
+			if err != nil {
+				log.Println("Error while creating Envoy Cluster Config with hostname:", err)
+				return err
+			}
+			envoyConfig.Clusters = append(envoyConfig.Clusters, *newClusterWithHostName)
+		}
+
 		// Adding new service to envoy Route Config
 		for _, listener := range envoyConfig.Listeners {
 			for _, filter := range listener.FilterChains[0].Filters {
@@ -213,7 +223,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	}
 	return nil
 }
-func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfig(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
+func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithIP(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
 	http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
 	if !serviceConfig.GrpcServiceVerify {
 		http2ProtocolOptions = nil
@@ -238,6 +248,46 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfig(serviceConfig *ConsulServic
 								Address: &envoyCoreApi.Address_SocketAddress{
 									SocketAddress: &envoyCoreApi.SocketAddress{
 										Address: serviceConfig.IP,
+										PortSpecifier: &envoyCoreApi.SocketAddress_PortValue{
+											PortValue: uint32(serviceConfig.Port),
+										},
+									},
+								},
+							},
+						},
+					},
+				}},
+			}},
+		},
+		Http2ProtocolOptions: http2ProtocolOptions,
+	}
+	return cluster, nil
+}
+func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
+	http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
+	if !serviceConfig.GrpcServiceVerify {
+		http2ProtocolOptions = nil
+	}
+	connectTimeOutInSeconds, err := strconv.Atoi(serviceConfig.EnvoyClusterConnectTimeOutInMs)
+	if err != nil {
+		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
+		return nil, err
+	}
+	cluster := &envoyApi.Cluster{
+		Name:                 serviceConfig.ContainerID+"-"+getopt(serviceConfig.Tags,serviceConfig.IP),
+		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
+		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
+		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
+		LoadAssignment: &envoyApi.ClusterLoadAssignment{
+			ClusterName: serviceConfig.ContainerID+"-"+getopt(serviceConfig.Tags,serviceConfig.IP),
+			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
+				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
+					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
+						Endpoint: &envoyEndpointApi.Endpoint{
+							Address: &envoyCoreApi.Address{
+								Address: &envoyCoreApi.Address_SocketAddress{
+									SocketAddress: &envoyCoreApi.SocketAddress{
+										Address: getopt(serviceConfig.Tags,serviceConfig.IP),
 										PortSpecifier: &envoyCoreApi.SocketAddress_PortValue{
 											PortValue: uint32(serviceConfig.Port),
 										},
@@ -361,4 +411,22 @@ func (r *ConsulEnvoyAdapter) RemoveAndUpdateEnvoyConfig(serviceConfig *ConsulSer
 		}
 	}
 	return nil
+}
+func getValueFromTag(tags []string, searchKey string) string {
+	for _, tag := range tags {
+		key := strings.Split(tag, ":")
+		if len(key) <= 1 {
+			continue
+		}
+		if key[0] == searchKey {
+			return key[1]
+		}
+	}
+	return ""
+}
+func getopt(tags[] string, def string) string {
+	if env:= getValueFromTag(tags,"consul.register/hostname") ; env != "" {
+		return getValueFromTag(tags,"node")
+	}
+	return def
 }
