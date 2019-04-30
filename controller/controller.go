@@ -273,13 +273,14 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
 		return nil, err
 	}
+	port, _ := strconv.ParseUint(getopt(serviceConfig.Tags, serviceConfig.IP, "consul.register/nodePort"), 10, 32)
 	cluster := &envoyApi.Cluster{
-		Name:                 serviceConfig.ContainerID+"-"+getopt(serviceConfig.Tags,serviceConfig.IP),
+		Name:                 serviceConfig.ContainerID + "-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
 		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
 		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
 		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
 		LoadAssignment: &envoyApi.ClusterLoadAssignment{
-			ClusterName: serviceConfig.ContainerID+"-"+getopt(serviceConfig.Tags,serviceConfig.IP),
+			ClusterName: serviceConfig.ContainerID + "-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
 			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
 				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
 					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
@@ -287,9 +288,9 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 							Address: &envoyCoreApi.Address{
 								Address: &envoyCoreApi.Address_SocketAddress{
 									SocketAddress: &envoyCoreApi.SocketAddress{
-										Address: getopt(serviceConfig.Tags,serviceConfig.IP),
+										Address: getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
 										PortSpecifier: &envoyCoreApi.SocketAddress_PortValue{
-											PortValue: uint32(serviceConfig.Port),
+											PortValue: uint32(port),
 										},
 									},
 								},
@@ -424,9 +425,9 @@ func getValueFromTag(tags []string, searchKey string) string {
 	}
 	return ""
 }
-func getopt(tags[] string, def string) string {
+func getopt(tags [] string, def string, searchKey string) string {
 	if env:= getValueFromTag(tags,"consul.register/hostname") ; env != "" {
-		return getValueFromTag(tags,"node")
+		return getValueFromTag(tags, searchKey)
 	}
 	return def
 }
