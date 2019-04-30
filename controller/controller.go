@@ -344,7 +344,7 @@ func (r *ConsulEnvoyAdapter) RemoveAndUpdateEnvoyConfig(serviceConfig *ConsulSer
 					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
 						envoyConfig.Clusters[i+1:]...)
 				}
-				if strings.HasPrefix(serviceConfig.ContainerID, before(cluster.Name,"-hostname-")) {
+				if strings.ContainsAny(cluster.Name,"-hostname-") && strings.HasPrefix(serviceConfig.ContainerID, before(cluster.Name,"-hostname-") ) {
 					isClusterFound = true
 					log.Printf("Removing service %s from envoy Cluster config with hostname", serviceConfig.ContainerID)
 					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
