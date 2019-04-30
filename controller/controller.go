@@ -275,12 +275,12 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 	}
 	port, _ := strconv.ParseUint(getopt(serviceConfig.Tags, serviceConfig.IP, "consul.register/nodePort"), 10, 32)
 	cluster := &envoyApi.Cluster{
-		Name:                 serviceConfig.ContainerID + "-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
+		Name:                 serviceConfig.ContainerID + "-hostname-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
 		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
 		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
 		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
 		LoadAssignment: &envoyApi.ClusterLoadAssignment{
-			ClusterName: serviceConfig.ContainerID + "-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
+			ClusterName: serviceConfig.ContainerID + "-hostname-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
 			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
 				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
 					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
@@ -344,6 +344,13 @@ func (r *ConsulEnvoyAdapter) RemoveAndUpdateEnvoyConfig(serviceConfig *ConsulSer
 					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
 						envoyConfig.Clusters[i+1:]...)
 				}
+				if strings.HasPrefix(serviceConfig.ContainerID, before(cluster.Name,"-hostname-")) {
+					isClusterFound = true
+					log.Printf("Removing service %s from envoy Cluster config with hostname", serviceConfig.ContainerID)
+					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
+						envoyConfig.Clusters[i+1:]...)
+				}
+
 			}
 			//Removing service from envoy Route config
 			if isClusterFound {
@@ -430,4 +437,12 @@ func getopt(tags [] string, def string, searchKey string) string {
 		return getValueFromTag(tags, searchKey)
 	}
 	return def
+}
+func before(value string, a string) string {
+	// Get substring before a string.
+	pos := strings.Index(value, a)
+	if pos == -1 {
+		return ""
+	}
+	return value[0:pos]
 }
