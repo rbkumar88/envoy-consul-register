@@ -28,6 +28,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 )
 
+const (
+	NodePortSuffix = "-nodePort"
+	HostnameLabel = "consul.register/hostname"
+	RoutePathLabel = "consul.register/routePath"
+)
 type ConsulEnvoyAdapter struct {
 	client *consulApi.Client
 }
@@ -89,10 +94,16 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 		}
 	}
 	isClusterFound := false
+	isClusterWithHostNameFound := false
 	if len(envoyConfig.Clusters) > 0 {
 		for _, elem := range envoyConfig.Clusters {
 			if strings.EqualFold(elem.Name, serviceConfig.ContainerID) {
 				isClusterFound = true
+			}
+			if env:= getValueFromTag(serviceConfig.Tags,HostnameLabel) ; env != "" {
+				if strings.EqualFold(elem.Name, getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix) {
+					isClusterWithHostNameFound = true
+				}
 			}
 		}
 	}
@@ -104,15 +115,6 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 			return err
 		}
 		envoyConfig.Clusters = append(envoyConfig.Clusters, *newCluster)
-
-		if env:= getValueFromTag(serviceConfig.Tags,"consul.register/hostname") ; env != "" {
-			newClusterWithHostName, err := r.buildEnvoyClusterConfigWithHostName(serviceConfig)
-			if err != nil {
-				log.Println("Error while creating Envoy Cluster Config with hostname:", err)
-				return err
-			}
-			envoyConfig.Clusters = append(envoyConfig.Clusters, *newClusterWithHostName)
-		}
 
 		// Adding new service to envoy Route Config
 		for _, listener := range envoyConfig.Listeners {
@@ -221,6 +223,125 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 			return err1
 		}
 	}
+	if !isClusterWithHostNameFound {
+		log.Printf("Adding new service with hostName %s to envoy Cluster config", serviceConfig.ContainerID)
+
+		if env:= getValueFromTag(serviceConfig.Tags,HostnameLabel) ; env != "" {
+			newClusterWithHostName, err := r.buildEnvoyClusterConfigWithHostName(serviceConfig)
+			if err != nil {
+				log.Println("Error while creating Envoy Cluster Config with hostname:", err)
+				return err
+			}
+			envoyConfig.Clusters = append(envoyConfig.Clusters, *newClusterWithHostName)
+		}
+		containerName := getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix
+		// Adding new service to envoy Route Config
+		for _, listener := range envoyConfig.Listeners {
+			for _, filter := range listener.FilterChains[0].Filters {
+				if filter.Name != util.HTTPConnectionManager {
+					continue
+				}
+				switch x := filter.ConfigType.(type) {
+				case *envoyListenerApi.Filter_Config:
+					routeConfig := x.Config.Fields["route_config"]
+					virtualHosts := routeConfig.GetStructValue().Fields["virtual_hosts"]
+					routes := virtualHosts.GetListValue().Values[0].GetStructValue().Fields["routes"]
+					//log.Printf("existing route config : %v",routes)
+					newRoute := map[string]*types.Value{
+						"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+							Fields: map[string]*types.Value{
+								"path": {Kind: &types.Value_StringValue{StringValue: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel)}},
+								"grpc": {Kind: &types.Value_StructValue{StructValue: &types.Struct{Fields: map[string]*types.Value{}}}},
+							},
+						}}},
+						"route": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+							Fields: map[string]*types.Value{
+								"cluster": {Kind: &types.Value_StringValue{StringValue: containerName}},
+							},
+						}}},
+					}
+					if !serviceConfig.GrpcServiceVerify {
+						newRoute = map[string]*types.Value{
+							"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+								Fields: map[string]*types.Value{
+									"path": {Kind: &types.Value_StringValue{StringValue: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel)}},
+								},
+							}}},
+							"route": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+								Fields: map[string]*types.Value{
+									"cluster": {Kind: &types.Value_StringValue{StringValue: containerName}},
+								},
+							}}},
+						}
+					}
+					route := &types.Value{Kind: &types.Value_StructValue{StructValue: &types.Struct{
+						Fields: newRoute}}}
+					log.Printf("Adding new service %s to envoy Route config", serviceConfig.ContainerID)
+					routes.GetListValue().Values = append(routes.GetListValue().Values, route)
+				case *envoyListenerApi.Filter_TypedConfig:
+					httpConnectionManager := &v2.HttpConnectionManager{}
+					// use typed config if available
+					err1 := types.UnmarshalAny(x.TypedConfig, httpConnectionManager)
+					if err1 != nil || httpConnectionManager == nil {
+						log.Println("Error while parsing Envoy HttpConnectionManager TypedConfig:", err1)
+						return err1
+					}
+					switch routeSpecifier := httpConnectionManager.RouteSpecifier.(type) {
+					case *v2.HttpConnectionManager_RouteConfig:
+						route := &envoyRouteApi.Route{
+							Match: envoyRouteApi.RouteMatch{
+								PathSpecifier: &envoyRouteApi.RouteMatch_Path{
+									Path: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel),
+								},
+								Grpc: &envoyRouteApi.RouteMatch_GrpcRouteMatchOptions{},
+							},
+							Action: &envoyRouteApi.Route_Route{
+								Route: &envoyRouteApi.RouteAction{
+									ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
+										ClusterHeader: containerName,
+									},
+								},
+							},
+						}
+						if !serviceConfig.GrpcServiceVerify {
+							route = &envoyRouteApi.Route{
+								Match: envoyRouteApi.RouteMatch{
+									PathSpecifier: &envoyRouteApi.RouteMatch_Path{
+										Path: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel),
+									},
+								},
+								Action: &envoyRouteApi.Route_Route{
+									Route: &envoyRouteApi.RouteAction{
+										ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
+											ClusterHeader: containerName,
+										},
+									},
+								},
+							}
+						}
+						routeSpecifier.RouteConfig.VirtualHosts[0].Routes = append(routeSpecifier.RouteConfig.VirtualHosts[0].Routes, *route)
+						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID,httpConnectionManager)
+						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
+					case *v2.HttpConnectionManager_Rds:
+					default:
+						return fmt.Errorf("Unsupported HttpConnectionManager RouteConfig %T", x)
+
+					}
+
+				case nil:
+				default:
+					return fmt.Errorf("Filter.ConfigType has unexpected type %T", x)
+				}
+			}
+		}
+		m := &jsonpb.Marshaler{OrigName: true}
+		marshaledString, err := m.MarshalToString(envoyConfig)
+		_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ConsulKVStoreKeyName, Value: []byte(marshaledString)}, nil)
+		if err1 != nil {
+			log.Println("consulkv: failed to store envoy config json:", err)
+			return err1
+		}
+	}
 	return nil
 }
 func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithIP(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
@@ -273,14 +394,15 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
 		return nil, err
 	}
+	containerName := getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix
 	port, _ := strconv.ParseUint(getopt(serviceConfig.Tags, serviceConfig.IP, "consul.register/nodePort"), 10, 32)
 	cluster := &envoyApi.Cluster{
-		Name:                 serviceConfig.ContainerID + "-hostname-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
+		Name:                 containerName,
 		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
 		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
 		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
 		LoadAssignment: &envoyApi.ClusterLoadAssignment{
-			ClusterName: serviceConfig.ContainerID + "-hostname-" + getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
+			ClusterName: containerName,
 			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
 				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
 					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
@@ -340,20 +462,10 @@ func (r *ConsulEnvoyAdapter) RemoveAndUpdateEnvoyConfig(serviceConfig *ConsulSer
 				cluster := envoyConfig.Clusters[i]
 				if strings.HasPrefix(serviceConfig.ContainerID, cluster.Name) {
 					isClusterFound = true
-					log.Printf("Removing cluster %s from envoy Cluster config, containerID: %s", cluster.Name,serviceConfig.ContainerID)
+					log.Printf("Removing service %s from envoy Cluster config", serviceConfig.ContainerID)
 					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
 						envoyConfig.Clusters[i+1:]...)
 				}
-			}
-			for i := len(envoyConfig.Clusters) - 1; i >= 0; i-- {
-				cluster := envoyConfig.Clusters[i]
-				if strings.Contains(cluster.Name,"-hostname-") && strings.HasPrefix(serviceConfig.ContainerID, before(cluster.Name,"-hostname-") ) {
-					isClusterFound = true
-					log.Printf("Removing cluster %s from envoy Cluster config with hostname,containerID: %s", cluster.Name,serviceConfig.ContainerID)
-					envoyConfig.Clusters = append(envoyConfig.Clusters[:i],
-						envoyConfig.Clusters[i+1:]...)
-				}
-
 			}
 			//Removing service from envoy Route config
 			if isClusterFound {
@@ -436,7 +548,7 @@ func getValueFromTag(tags []string, searchKey string) string {
 	return ""
 }
 func getopt(tags [] string, def string, searchKey string) string {
-	if env:= getValueFromTag(tags,"consul.register/hostname") ; env != "" {
+	if env:= getValueFromTag(tags,HostnameLabel) ; env != "" {
 		return getValueFromTag(tags, searchKey)
 	}
 	return def
