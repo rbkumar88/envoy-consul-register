@@ -104,6 +104,8 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 				if strings.EqualFold(elem.Name, getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix) {
 					isClusterWithHostNameFound = true
 				}
+			}else{
+				isClusterWithHostNameFound = true
 			}
 		}
 	}
