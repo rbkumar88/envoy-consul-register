@@ -60,6 +60,11 @@ func (c *ConsulEnvoyAdapter) Put(p *consulApi.KVPair, q *consulApi.WriteOptions)
 }
 func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServiceConfig) error {
 	kv, _, _ := r.client.KV().Get(serviceConfig.ConsulKVStoreKeyName, nil)
+	serviceConfigError := r.updateEnvoyServiceConfigFromConsulKV(serviceConfig)
+	if serviceConfigError!=nil{
+		log.Println("key found : Error while unmarshaling service Config :", serviceConfigError)
+		return serviceConfigError
+	}
 	envoyConfig := &envoyBootstrapApi.Bootstrap_StaticResources{}
 	resolver := funcResolver(func(turl string) (proto.Message, error) {
 		switch turl {
@@ -332,7 +337,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 					case *v2.HttpConnectionManager_Rds:
 					default:
-						return fmt.Errorf("Unsupported HttpConnectionManager RouteConfig %T", x)
+						return fmt.Errorf("Unsupported HttpConnectionManager RouteConfig %T ", x)
 
 					}
 
@@ -444,7 +449,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	marshaledString, _ := json.Marshal(serviceConfig.EnvoyDynamicConfig)
 	_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ServiceName, Value: []byte(marshaledString)}, nil)
 	if err1 != nil {
-		log.Println("consulkv: failed to store envoy config json:", err1)
+		log.Printf("consulkv: failed to store service config for %s: %s \n", serviceConfig.ServiceName,err1)
 		return err1
 	}
 	envoyConfig := &envoyBootstrapApi.Bootstrap_StaticResources{}
@@ -747,5 +752,22 @@ func before(value string, a string) string {
 }
 func (r *ConsulEnvoyAdapter) getServiceNameFromConsul(clusterName string, serviceNameFromRequest string) string {
 	agentService, _, _ := r.client.Agent().Service(clusterName+"-"+serviceNameFromRequest, nil);
-	return getValueFromTag(agentService.Tags, "container")
+	if agentService != nil && agentService.Tags != nil && len(agentService.Tags) > 0 {
+		return getValueFromTag(agentService.Tags, "container")
+	}
+	return ""
+}
+func (r *ConsulEnvoyAdapter) updateEnvoyServiceConfigFromConsulKV(serviceConfig *ConsulServiceConfig) error {
+	if val := getValueFromTag(serviceConfig.Tags, "container"); val != "" {
+		kv, _, _ := r.client.KV().Get(val, nil)
+		if kv != nil {
+			envoyDynamicConfig := &EnvoyServiceConfig{}
+			err := json.Unmarshal(kv.Value, envoyDynamicConfig)
+			if err != nil {
+				return fmt.Errorf("Error while parsing service config: %q ", err)
+			}
+			serviceConfig.EnvoyDynamicConfig = envoyDynamicConfig
+		}
+	}
+	return nil
 }
