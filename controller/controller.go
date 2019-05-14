@@ -26,13 +26,15 @@ import (
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
 	"github.com/gogo/protobuf/proto"
+	"encoding/json"
 )
 
 const (
 	NodePortSuffix = "-nodePort"
-	HostnameLabel = "consul.register/hostname"
+	HostnameLabel  = "consul.register/hostname"
 	RoutePathLabel = "consul.register/routePath"
 )
+
 type ConsulEnvoyAdapter struct {
 	client *consulApi.Client
 }
@@ -100,11 +102,11 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 			if strings.EqualFold(elem.Name, serviceConfig.ContainerID) {
 				isClusterFound = true
 			}
-			if env:= getValueFromTag(serviceConfig.Tags,HostnameLabel) ; env != "" {
-				if strings.EqualFold(elem.Name, getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix) {
+			if env := getValueFromTag(serviceConfig.Tags, HostnameLabel); env != "" {
+				if strings.EqualFold(elem.Name, getValueFromTag(serviceConfig.Tags, "container")+NodePortSuffix) {
 					isClusterWithHostNameFound = true
 				}
-			}else{
+			} else {
 				isClusterWithHostNameFound = true
 			}
 		}
@@ -183,6 +185,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 									ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
 										ClusterHeader: serviceConfig.EnvoyClusterHeaderName,
 									},
+									RetryPolicy: serviceConfig.EnvoyDynamicConfig.RetryPolicy,
 								},
 							},
 						}
@@ -198,12 +201,13 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 										ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
 											ClusterHeader: serviceConfig.EnvoyClusterHeaderName,
 										},
+										RetryPolicy: serviceConfig.EnvoyDynamicConfig.RetryPolicy,
 									},
 								},
 							}
 						}
 						routeSpecifier.RouteConfig.VirtualHosts[0].Routes = append(routeSpecifier.RouteConfig.VirtualHosts[0].Routes, *route)
-						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID,httpConnectionManager)
+						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID, httpConnectionManager)
 						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 					case *v2.HttpConnectionManager_Rds:
 					default:
@@ -228,7 +232,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	if !isClusterWithHostNameFound {
 		log.Printf("Adding new service with hostName %s to envoy Cluster config", serviceConfig.ContainerID)
 
-		if env:= getValueFromTag(serviceConfig.Tags,HostnameLabel) ; env != "" {
+		if env := getValueFromTag(serviceConfig.Tags, HostnameLabel); env != "" {
 			newClusterWithHostName, err := r.buildEnvoyClusterConfigWithHostName(serviceConfig)
 			if err != nil {
 				log.Println("Error while creating Envoy Cluster Config with hostname:", err)
@@ -236,7 +240,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 			}
 			envoyConfig.Clusters = append(envoyConfig.Clusters, *newClusterWithHostName)
 		}
-		containerName := getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix
+		containerName := getValueFromTag(serviceConfig.Tags, "container") + NodePortSuffix
 		// Adding new service to envoy Route Config
 		for _, listener := range envoyConfig.Listeners {
 			for _, filter := range listener.FilterChains[0].Filters {
@@ -252,7 +256,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 					newRoute := map[string]*types.Value{
 						"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
 							Fields: map[string]*types.Value{
-								"path": {Kind: &types.Value_StringValue{StringValue: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel)}},
+								"path": {Kind: &types.Value_StringValue{StringValue: "/" + getValueFromTag(serviceConfig.Tags, RoutePathLabel)}},
 								"grpc": {Kind: &types.Value_StructValue{StructValue: &types.Struct{Fields: map[string]*types.Value{}}}},
 							},
 						}}},
@@ -266,7 +270,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 						newRoute = map[string]*types.Value{
 							"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
 								Fields: map[string]*types.Value{
-									"path": {Kind: &types.Value_StringValue{StringValue: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel)}},
+									"path": {Kind: &types.Value_StringValue{StringValue: "/" + getValueFromTag(serviceConfig.Tags, RoutePathLabel)}},
 								},
 							}}},
 							"route": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
@@ -293,15 +297,16 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 						route := &envoyRouteApi.Route{
 							Match: envoyRouteApi.RouteMatch{
 								PathSpecifier: &envoyRouteApi.RouteMatch_Path{
-									Path: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel),
+									Path: "/" + getValueFromTag(serviceConfig.Tags, RoutePathLabel),
 								},
 								Grpc: &envoyRouteApi.RouteMatch_GrpcRouteMatchOptions{},
 							},
 							Action: &envoyRouteApi.Route_Route{
 								Route: &envoyRouteApi.RouteAction{
-									ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
-										ClusterHeader: containerName,
+									ClusterSpecifier: &envoyRouteApi.RouteAction_Cluster{
+										Cluster: containerName,
 									},
+									RetryPolicy: serviceConfig.EnvoyDynamicConfig.RetryPolicy,
 								},
 							},
 						}
@@ -309,20 +314,21 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 							route = &envoyRouteApi.Route{
 								Match: envoyRouteApi.RouteMatch{
 									PathSpecifier: &envoyRouteApi.RouteMatch_Path{
-										Path: "/"+getValueFromTag(serviceConfig.Tags,RoutePathLabel),
+										Path: "/" + getValueFromTag(serviceConfig.Tags, RoutePathLabel),
 									},
 								},
 								Action: &envoyRouteApi.Route_Route{
 									Route: &envoyRouteApi.RouteAction{
-										ClusterSpecifier: &envoyRouteApi.RouteAction_ClusterHeader{
-											ClusterHeader: containerName,
+										ClusterSpecifier: &envoyRouteApi.RouteAction_Cluster{
+											Cluster: containerName,
 										},
+										RetryPolicy: serviceConfig.EnvoyDynamicConfig.RetryPolicy,
 									},
 								},
 							}
 						}
 						routeSpecifier.RouteConfig.VirtualHosts[0].Routes = append(routeSpecifier.RouteConfig.VirtualHosts[0].Routes, *route)
-						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID,httpConnectionManager)
+						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID, httpConnectionManager)
 						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 					case *v2.HttpConnectionManager_Rds:
 					default:
@@ -383,6 +389,8 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithIP(serviceConfig *Consul
 			}},
 		},
 		Http2ProtocolOptions: http2ProtocolOptions,
+		HealthChecks:         serviceConfig.EnvoyDynamicConfig.HealthChecks,
+		TlsContext:           serviceConfig.EnvoyDynamicConfig.TlsContext,
 	}
 	return cluster, nil
 }
@@ -396,7 +404,7 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
 		return nil, err
 	}
-	containerName := getValueFromTag(serviceConfig.Tags,"container")+NodePortSuffix
+	containerName := getValueFromTag(serviceConfig.Tags, "container") + NodePortSuffix
 	port, _ := strconv.ParseUint(getopt(serviceConfig.Tags, serviceConfig.IP, "consul.register/nodePort"), 10, 32)
 	cluster := &envoyApi.Cluster{
 		Name:                 containerName,
@@ -425,8 +433,182 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 			}},
 		},
 		Http2ProtocolOptions: http2ProtocolOptions,
+		HealthChecks:         serviceConfig.EnvoyDynamicConfig.HealthChecks,
+		TlsContext:           serviceConfig.EnvoyDynamicConfig.TlsContext,
 	}
 	return cluster, nil
+}
+
+func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServiceConfig) error {
+	kv, _, _ := r.client.KV().Get(serviceConfig.ConsulKVStoreKeyName, nil)
+	marshaledString, _ := json.Marshal(serviceConfig.EnvoyDynamicConfig)
+	_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ServiceName, Value: []byte(marshaledString)}, nil)
+	if err1 != nil {
+		log.Println("consulkv: failed to store envoy config json:", err1)
+		return err1
+	}
+	envoyConfig := &envoyBootstrapApi.Bootstrap_StaticResources{}
+	resolver := funcResolver(func(turl string) (proto.Message, error) {
+		switch turl {
+		case "type.googleapis.com/envoy.config.filter.network.rate_limit.v2.RateLimit":
+			return new(rateLimit.RateLimit), nil
+		case "type.googleapis.com/envoy.config.filter.network.tcp_proxy.v2.TcpProxy":
+			return new(tcpProxy.TcpProxy), nil
+		case "type.googleapis.com/envoy.config.accesslog.v2.FileAccessLog":
+			return new(fileAccessLog.FileAccessLog), nil
+		case "type.googleapis.com/envoy.config.filter.network.http_connection_manager.v2.HttpConnectionManager":
+			return new(httpConnManager.HttpConnectionManager), nil
+		case "type.googleapis.com/envoy.config.filter.http.router.v2.Router":
+			return new(httpRouter.Router), nil
+		}
+		return new(httpConnManager.HttpConnectionManager), nil
+	})
+
+	u := &jsonpb.Unmarshaler{AnyResolver: resolver}
+	if kv != nil {
+		if err2 := u.Unmarshal(strings.NewReader(string(kv.Value)), envoyConfig); err2 != nil {
+			log.Println("key found : Error while unmarshaling envoy Config :", err2)
+			return err2
+		}
+	} else {
+		data, err := ioutil.ReadFile("/etc/envoy_base_config.json")
+		_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ConsulKVStoreKeyName, Value: []byte(data)}, nil)
+		if err1 != nil {
+			log.Println("consulkv: failed to store envoy config json:", err)
+			return err
+		}
+		if err2 := jsonpb.Unmarshal(strings.NewReader(string(data)), envoyConfig); err2 != nil {
+			log.Println("key not found : Error while unmarshaling envoy Config :", err2)
+			return err2
+		}
+	}
+	isClusterFound := false
+	if len(envoyConfig.Clusters) > 0 {
+		for _, cluster := range envoyConfig.Clusters {
+			if strings.EqualFold(r.getServiceNameFromConsul(cluster.Name, serviceConfig.ServiceName), serviceConfig.ServiceName) ||
+				strings.EqualFold(before(cluster.Name, NodePortSuffix), serviceConfig.ServiceName) {
+				isClusterFound = true
+				updateEnvoyClusterConfig(serviceConfig, cluster)
+				log.Printf("Update envoy Cluster config for %s", serviceConfig.ServiceName)
+			}
+		}
+	}
+	if isClusterFound {
+		// Update envoy Route Config
+		for _, listener := range envoyConfig.Listeners {
+			for _, filter := range listener.FilterChains[0].Filters {
+				if filter.Name != util.HTTPConnectionManager {
+					continue
+				}
+				switch x := filter.ConfigType.(type) {
+				case *envoyListenerApi.Filter_Config:
+					routeConfig := x.Config.Fields["route_config"]
+					virtualHosts := routeConfig.GetStructValue().Fields["virtual_hosts"]
+					routes := virtualHosts.GetListValue().Values[0].GetStructValue().Fields["routes"]
+					//log.Printf("existing route config : %v",routes)
+					newRoute := map[string]*types.Value{
+						"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+							Fields: map[string]*types.Value{
+								"path": {Kind: &types.Value_StringValue{StringValue: serviceConfig.ContainerID}},
+								"grpc": {Kind: &types.Value_StructValue{StructValue: &types.Struct{Fields: map[string]*types.Value{}}}},
+							},
+						}}},
+						"route": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+							Fields: map[string]*types.Value{
+								"cluster_header": {Kind: &types.Value_StringValue{StringValue: serviceConfig.EnvoyClusterHeaderName}},
+							},
+						}}},
+					}
+					if !serviceConfig.GrpcServiceVerify {
+						newRoute = map[string]*types.Value{
+							"match": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+								Fields: map[string]*types.Value{
+									"path": {Kind: &types.Value_StringValue{StringValue: serviceConfig.ContainerID}},
+								},
+							}}},
+							"route": {Kind: &types.Value_StructValue{StructValue: &types.Struct{
+								Fields: map[string]*types.Value{
+									"cluster_header": {Kind: &types.Value_StringValue{StringValue: serviceConfig.EnvoyClusterHeaderName}},
+								},
+							}}},
+						}
+					}
+					route := &types.Value{Kind: &types.Value_StructValue{StructValue: &types.Struct{
+						Fields: newRoute}}}
+					log.Printf("Adding new service %s to envoy Route config", serviceConfig.ContainerID)
+					routes.GetListValue().Values = append(routes.GetListValue().Values, route)
+				case *envoyListenerApi.Filter_TypedConfig:
+					httpConnectionManager := &v2.HttpConnectionManager{}
+					// use typed config if available
+					err1 := types.UnmarshalAny(x.TypedConfig, httpConnectionManager)
+					if err1 != nil || httpConnectionManager == nil {
+						log.Println("Error while parsing Envoy HttpConnectionManager TypedConfig:", err1)
+						return err1
+					}
+					switch routeSpecifier := httpConnectionManager.RouteSpecifier.(type) {
+					case *v2.HttpConnectionManager_RouteConfig:
+						if len(routeSpecifier.RouteConfig.VirtualHosts[0].Routes) > 0 {
+							for _, route := range routeSpecifier.RouteConfig.VirtualHosts[0].Routes {
+								switch pathSpecifier := route.Match.PathSpecifier.(type) {
+								case *envoyRouteApi.RouteMatch_Prefix, *envoyRouteApi.RouteMatch_Regex:
+									break
+								case *envoyRouteApi.RouteMatch_Path:
+									if strings.EqualFold(r.getServiceNameFromConsul(pathSpecifier.Path, serviceConfig.ServiceName), serviceConfig.ServiceName) {
+										log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
+										updateEnvoyRouteConfig(serviceConfig, route)
+									}
+								}
+							}
+							for _, route := range routeSpecifier.RouteConfig.VirtualHosts[0].Routes {
+								switch routeAction := route.Action.(type) {
+								case *envoyRouteApi.Route_DirectResponse, *envoyRouteApi.Route_Redirect:
+									break
+								case *envoyRouteApi.Route_Route:
+									switch clusterSpecifier := routeAction.Route.ClusterSpecifier.(type) {
+									case *envoyRouteApi.RouteAction_ClusterHeader,*envoyRouteApi.RouteAction_WeightedClusters:
+										break
+									case *envoyRouteApi.RouteAction_Cluster:
+										if strings.EqualFold(before(clusterSpecifier.Cluster,NodePortSuffix),serviceConfig.ServiceName) {
+											log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
+											updateEnvoyRouteConfig(serviceConfig, route)
+										}
+									}
+								}
+							}
+						}
+					case *v2.HttpConnectionManager_Rds:
+					default:
+						return fmt.Errorf("Unsupported HttpConnectionManager RouteConfig %T ", x)
+
+					}
+				case nil:
+				default:
+					return fmt.Errorf("Filter.ConfigType has unexpected type %T", x)
+				}
+			}
+		}
+		m := &jsonpb.Marshaler{OrigName: true}
+		marshaledString, _ := m.MarshalToString(envoyConfig)
+		_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ConsulKVStoreKeyName, Value: []byte(marshaledString)}, nil)
+		if err1 != nil {
+			log.Println("consulkv: failed to store envoy config json:", err1)
+			return err1
+		}
+	}
+	return nil
+}
+func updateEnvoyClusterConfig(serviceConfig *ConsulServiceConfig, cluster envoyApi.Cluster) {
+	//http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
+	//cluster.Http2ProtocolOptions= http2ProtocolOptions
+	cluster.HealthChecks = serviceConfig.EnvoyDynamicConfig.HealthChecks
+	cluster.TlsContext = serviceConfig.EnvoyDynamicConfig.TlsContext
+}
+
+func updateEnvoyRouteConfig(serviceConfig *ConsulServiceConfig, route envoyRouteApi.Route) {
+	switch routeAction := route.Action.(type) {
+	case *envoyRouteApi.Route_Route:
+		routeAction.Route.RetryPolicy = serviceConfig.EnvoyDynamicConfig.RetryPolicy
+	}
 }
 
 type funcResolver func(turl string) (proto.Message, error)
@@ -550,7 +732,7 @@ func getValueFromTag(tags []string, searchKey string) string {
 	return ""
 }
 func getopt(tags [] string, def string, searchKey string) string {
-	if env:= getValueFromTag(tags,HostnameLabel) ; env != "" {
+	if env := getValueFromTag(tags, HostnameLabel); env != "" {
 		return getValueFromTag(tags, searchKey)
 	}
 	return def
@@ -562,4 +744,8 @@ func before(value string, a string) string {
 		return ""
 	}
 	return value[0:pos]
+}
+func (r *ConsulEnvoyAdapter) getServiceNameFromConsul(clusterName string, serviceNameFromRequest string) string {
+	agentService, _, _ := r.client.Agent().Service(clusterName+"-"+serviceNameFromRequest, nil);
+	return getValueFromTag(agentService.Tags, "container")
 }
