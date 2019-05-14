@@ -19,7 +19,7 @@ type ConsulServiceConfig struct {
 	GrpcServiceVerify bool
 	EnvoyClusterHeaderName string
 	EnvoyClusterConnectTimeOutInMs string
-	EnvoyDynamicConfig EnvoyServiceConfig
+	EnvoyDynamicConfig *EnvoyServiceConfig
 	ServiceName string
 }
 
