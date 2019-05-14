@@ -61,7 +61,7 @@ func (c *ConsulEnvoyAdapter) Put(p *consulApi.KVPair, q *consulApi.WriteOptions)
 func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServiceConfig) error {
 	kv, _, _ := r.client.KV().Get(serviceConfig.ConsulKVStoreKeyName, nil)
 	serviceConfigError := r.updateEnvoyServiceConfigFromConsulKV(serviceConfig)
-	if serviceConfigError!=nil{
+	if serviceConfigError != nil {
 		log.Println("key found : Error while unmarshaling service Config :", serviceConfigError)
 		return serviceConfigError
 	}
@@ -449,7 +449,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	marshaledString, _ := json.Marshal(serviceConfig.EnvoyDynamicConfig)
 	_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ServiceName, Value: []byte(marshaledString)}, nil)
 	if err1 != nil {
-		log.Printf("consulkv: failed to store service config for %s: %s \n", serviceConfig.ServiceName,err1)
+		log.Printf("consulkv: failed to store service config for %s: %s \n", serviceConfig.ServiceName, err1)
 		return err1
 	}
 	envoyConfig := &envoyBootstrapApi.Bootstrap_StaticResources{}
@@ -490,7 +490,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	isClusterFound := false
 	if len(envoyConfig.Clusters) > 0 {
 		for _, cluster := range envoyConfig.Clusters {
-			if strings.EqualFold(r.getServiceNameFromConsul(cluster.Name, serviceConfig.ServiceName), serviceConfig.ServiceName) ||
+			if strings.EqualFold(r.getServiceNameFromConsul(cluster.Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(cluster.Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
 				updateEnvoyClusterConfig(serviceConfig, cluster)
@@ -558,7 +558,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 								case *envoyRouteApi.RouteMatch_Prefix, *envoyRouteApi.RouteMatch_Regex:
 									break
 								case *envoyRouteApi.RouteMatch_Path:
-									if strings.EqualFold(r.getServiceNameFromConsul(pathSpecifier.Path, serviceConfig.ServiceName), serviceConfig.ServiceName) {
+									if strings.EqualFold(r.getServiceNameFromConsul(pathSpecifier.Path, serviceConfig), serviceConfig.ServiceName) {
 										log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
 										updateEnvoyRouteConfig(serviceConfig, route)
 									}
@@ -570,10 +570,10 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 									break
 								case *envoyRouteApi.Route_Route:
 									switch clusterSpecifier := routeAction.Route.ClusterSpecifier.(type) {
-									case *envoyRouteApi.RouteAction_ClusterHeader,*envoyRouteApi.RouteAction_WeightedClusters:
+									case *envoyRouteApi.RouteAction_ClusterHeader, *envoyRouteApi.RouteAction_WeightedClusters:
 										break
 									case *envoyRouteApi.RouteAction_Cluster:
-										if strings.EqualFold(before(clusterSpecifier.Cluster,NodePortSuffix),serviceConfig.ServiceName) {
+										if strings.EqualFold(before(clusterSpecifier.Cluster, NodePortSuffix), serviceConfig.ServiceName) {
 											log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
 											updateEnvoyRouteConfig(serviceConfig, route)
 										}
@@ -750,15 +750,23 @@ func before(value string, a string) string {
 	}
 	return value[0:pos]
 }
-func (r *ConsulEnvoyAdapter) getServiceNameFromConsul(clusterName string, serviceNameFromRequest string) string {
-	agentService, _, _ := r.client.Agent().Service(clusterName+"-"+serviceNameFromRequest, nil);
+func (r *ConsulEnvoyAdapter) getServiceNameFromConsul(clusterName string, serviceConfig *ConsulServiceConfig) string {
+	agentService, _, err := r.client.Agent().Service(clusterName+"-"+serviceConfig.ServiceName, nil)
+	if err != nil {
+		return serviceConfig.Name
+	}
 	if agentService != nil && agentService.Tags != nil && len(agentService.Tags) > 0 {
 		return getValueFromTag(agentService.Tags, "container")
+	} else {
+		return serviceConfig.Name
 	}
-	return ""
 }
 func (r *ConsulEnvoyAdapter) updateEnvoyServiceConfigFromConsulKV(serviceConfig *ConsulServiceConfig) error {
-	if val := getValueFromTag(serviceConfig.Tags, "container"); val != "" {
+	consulServiceName := getValueFromTag(serviceConfig.Tags, "container")
+	if consulServiceName == "" {
+		consulServiceName = serviceConfig.Name
+	}
+	if val := consulServiceName; val != "" {
 		kv, _, _ := r.client.KV().Get(val, nil)
 		if kv != nil {
 			envoyDynamicConfig := &EnvoyServiceConfig{}
