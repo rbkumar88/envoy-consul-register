@@ -574,12 +574,14 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 										break
 									case *envoyRouteApi.RouteAction_Cluster:
 										if strings.EqualFold(before(clusterSpecifier.Cluster, NodePortSuffix), serviceConfig.ServiceName) {
-											log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
+											log.Printf("Updating envoy Route config for service with hostname %s", serviceConfig.ServiceName)
 											updateEnvoyRouteConfig(serviceConfig, route)
 										}
 									}
 								}
 							}
+							log.Printf("httpConnManager:%+v \n ",httpConnectionManager)
+							x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 						}
 					case *v2.HttpConnectionManager_Rds:
 					default:
