@@ -489,11 +489,12 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	}
 	isClusterFound := false
 	if len(envoyConfig.Clusters) > 0 {
-		for _, cluster := range envoyConfig.Clusters {
+		for key, cluster := range envoyConfig.Clusters {
 			if strings.EqualFold(r.getServiceNameFromConsul(cluster.Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(cluster.Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
 				updateEnvoyClusterConfig(serviceConfig, cluster)
+				envoyConfig.Clusters[key] = cluster
 				log.Printf("Update envoy Cluster config for service %s, cluster %s", serviceConfig.ServiceName,cluster.Name)
 			}
 		}
@@ -560,7 +561,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 									break
 								case *envoyRouteApi.RouteMatch_Path:
 									if strings.EqualFold(r.getServiceNameFromConsul(pathSpecifier.Path, serviceConfig), serviceConfig.ServiceName) {
-										log.Printf("Updating envoy Route config for service %s", serviceConfig.ServiceName)
+										log.Printf("Updating envoy Route config for service %s, cluster %s", serviceConfig.ServiceName,pathSpecifier.Path)
 										updateEnvoyRouteConfig(serviceConfig, route)
 									}
 								}
