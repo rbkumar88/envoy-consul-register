@@ -9,7 +9,6 @@ import "envoy/api/v2/route/route.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/wrappers.proto";
 
-import "validate/validate.proto";
 import "gogoproto/gogo.proto";
 message EnvoyServiceConfig {
     envoy.api.v2.route.RetryPolicy retry_policy = 1;
