@@ -332,7 +332,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 							}
 						}
 						routeSpecifier.RouteConfig.VirtualHosts[0].Routes = append(routeSpecifier.RouteConfig.VirtualHosts[0].Routes, *route)
-						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID, httpConnectionManager)
+						log.Printf("Adding new service %s to envoy Route config", serviceConfig.ContainerID)
 						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 					case *v2.HttpConnectionManager_Rds:
 					default:
@@ -495,11 +495,10 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 				isClusterFound = true
 				envoyConfig.Clusters[cluster].HealthChecks = serviceConfig.EnvoyDynamicConfig.HealthChecks
 				envoyConfig.Clusters[cluster].TlsContext = serviceConfig.EnvoyDynamicConfig.TlsContext
-				log.Printf("Update envoy Cluster config for service %s, cluster %s, key :%s", serviceConfig.ServiceName,envoyConfig.Clusters[cluster].Name)
+				log.Printf("Update envoy Cluster config for service %s, cluster %s \n", serviceConfig.ServiceName,envoyConfig.Clusters[cluster].Name)
 			}
 		}
 	}
-	log.Printf("test:%+v",envoyConfig.Clusters)
 	if isClusterFound {
 		// Update envoy Route Config
 		for _, listener := range envoyConfig.Listeners {
@@ -576,13 +575,13 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 										break
 									case *envoyRouteApi.RouteAction_Cluster:
 										if strings.EqualFold(before(clusterSpecifier.Cluster, NodePortSuffix), serviceConfig.ServiceName) {
-											log.Printf("Updating envoy Route config for service with hostname %s", serviceConfig.ServiceName)
+											log.Printf("Updating envoy Route config for service with hostname %s, cluster %s", serviceConfig.ServiceName,clusterSpecifier.Cluster)
 											updateEnvoyRouteConfig(serviceConfig, route)
 										}
 									}
 								}
 							}
-							log.Printf("httpConnManager:%+v \n ",httpConnectionManager)
+							//log.Printf("httpConnManager:%+v \n ",httpConnectionManager)
 							x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 						}
 					case *v2.HttpConnectionManager_Rds:
