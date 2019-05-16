@@ -489,13 +489,13 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	}
 	isClusterFound := false
 	if len(envoyConfig.Clusters) > 0 {
-		for key, cluster := range envoyConfig.Clusters {
-			if strings.EqualFold(r.getServiceNameFromConsul(cluster.Name, serviceConfig), serviceConfig.ServiceName) ||
-				strings.EqualFold(before(cluster.Name, NodePortSuffix), serviceConfig.ServiceName) {
+		for cluster := range envoyConfig.Clusters {
+			if strings.EqualFold(r.getServiceNameFromConsul(envoyConfig.Clusters[cluster].Name, serviceConfig), serviceConfig.ServiceName) ||
+				strings.EqualFold(before(envoyConfig.Clusters[cluster].Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
-				updateEnvoyClusterConfig(serviceConfig, cluster)
-				envoyConfig.Clusters[key] = cluster
-				log.Printf("Update envoy Cluster config for service %s, cluster %s", serviceConfig.ServiceName,cluster.Name)
+				envoyConfig.Clusters[cluster].HealthChecks = serviceConfig.EnvoyDynamicConfig.HealthChecks
+				envoyConfig.Clusters[cluster].TlsContext = serviceConfig.EnvoyDynamicConfig.TlsContext
+				log.Printf("Update envoy Cluster config for service %s, cluster %s, key :%s", serviceConfig.ServiceName,envoyConfig.Clusters[cluster].Name)
 			}
 		}
 	}
@@ -604,12 +604,6 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 		}
 	}
 	return nil
-}
-func updateEnvoyClusterConfig(serviceConfig *ConsulServiceConfig, cluster envoyApi.Cluster) {
-	//http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
-	//cluster.Http2ProtocolOptions= http2ProtocolOptions
-	cluster.HealthChecks = serviceConfig.EnvoyDynamicConfig.HealthChecks
-	cluster.TlsContext = serviceConfig.EnvoyDynamicConfig.TlsContext
 }
 
 func updateEnvoyRouteConfig(serviceConfig *ConsulServiceConfig, route envoyRouteApi.Route) {
