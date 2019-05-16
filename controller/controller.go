@@ -494,10 +494,11 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 				strings.EqualFold(before(cluster.Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
 				updateEnvoyClusterConfig(serviceConfig, cluster)
-				log.Printf("Update envoy Cluster config for %s", serviceConfig.ServiceName)
+				log.Printf("Update envoy Cluster config for service %s, cluster %s", serviceConfig.ServiceName,cluster.Name)
 			}
 		}
 	}
+	log.Printf("test:%+v",envoyConfig.Clusters)
 	if isClusterFound {
 		// Update envoy Route Config
 		for _, listener := range envoyConfig.Listeners {
