@@ -26,7 +26,6 @@ import (
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
 	"github.com/gogo/protobuf/proto"
-	"encoding/json"
 )
 
 const (
@@ -446,7 +445,8 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 
 func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServiceConfig) error {
 	kv, _, _ := r.client.KV().Get(serviceConfig.ConsulKVStoreKeyName, nil)
-	marshaledString, _ := json.Marshal(serviceConfig.EnvoyDynamicConfig)
+	m := &jsonpb.Marshaler{OrigName: true}
+	marshaledString, _ := m.MarshalToString(serviceConfig.EnvoyDynamicConfig)
 	_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ServiceName, Value: []byte(marshaledString)}, nil)
 	if err1 != nil {
 		log.Printf("consulkv: failed to store service config for %s: %s \n", serviceConfig.ServiceName, err1)
@@ -594,7 +594,6 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 				}
 			}
 		}
-		m := &jsonpb.Marshaler{OrigName: true}
 		marshaledString, _ := m.MarshalToString(envoyConfig)
 		_, err1 := r.client.KV().Put(&consulApi.KVPair{Key: serviceConfig.ConsulKVStoreKeyName, Value: []byte(marshaledString)}, nil)
 		if err1 != nil {
@@ -772,7 +771,8 @@ func (r *ConsulEnvoyAdapter) updateEnvoyServiceConfigFromConsulKV(serviceConfig 
 		kv, _, _ := r.client.KV().Get(val, nil)
 		if kv != nil {
 			envoyDynamicConfig := &EnvoyServiceConfig{}
-			err := json.Unmarshal(kv.Value, envoyDynamicConfig)
+			u := &jsonpb.Unmarshaler{}
+			err := u.Unmarshal(strings.NewReader(string(kv.Value)), envoyDynamicConfig)
 			if err != nil {
 				return fmt.Errorf("Error while parsing service config: %q ", err)
 			}
