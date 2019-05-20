@@ -1,17 +1,11 @@
 syntax = "proto3";
 
 package controller;
-import "envoy/api/v2/core/base.proto";
-import "envoy/api/v2/core/health_check.proto";
-import "envoy/api/v2/auth/cert.proto";
+import "envoy/api/v2/cds.proto";
 import "envoy/api/v2/route/route.proto";
-
-import "google/protobuf/duration.proto";
-import "google/protobuf/wrappers.proto";
 
 import "gogoproto/gogo.proto";
 message EnvoyServiceConfig {
     envoy.api.v2.route.RetryPolicy retry_policy = 1;
-    repeated envoy.api.v2.core.HealthCheck health_checks = 2;
-    envoy.api.v2.auth.UpstreamTlsContext tls_context = 3;
+    envoy.api.v2.Cluster cluster = 2;
 }
