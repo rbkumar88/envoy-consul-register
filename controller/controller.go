@@ -22,7 +22,6 @@ import (
 	"github.com/gogo/protobuf/types"
 	"fmt"
 	"strconv"
-	"time"
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
 	"github.com/gogo/protobuf/proto"
@@ -359,88 +358,38 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	return nil
 }
 func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithIP(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
-	http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
-	if !serviceConfig.GrpcServiceVerify {
-		http2ProtocolOptions = nil
-	}
-	connectTimeOutInSeconds, err := strconv.Atoi(serviceConfig.EnvoyClusterConnectTimeOutInMs)
-	if err != nil {
-		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
-		return nil, err
-	}
-	cluster := &envoyApi.Cluster{
-		Name:                 serviceConfig.ContainerID,
-		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
-		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
-		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
-		LoadAssignment: &envoyApi.ClusterLoadAssignment{
-			ClusterName: serviceConfig.ContainerID,
-			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
-				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
-					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
-						Endpoint: &envoyEndpointApi.Endpoint{
-							Address: &envoyCoreApi.Address{
-								Address: &envoyCoreApi.Address_SocketAddress{
-									SocketAddress: &envoyCoreApi.SocketAddress{
-										Address: serviceConfig.IP,
-										PortSpecifier: &envoyCoreApi.SocketAddress_PortValue{
-											PortValue: uint32(serviceConfig.Port),
-										},
-									},
-								},
-							},
-						},
-					},
-				}},
-			}},
-		},
-		Http2ProtocolOptions: http2ProtocolOptions,
-		HealthChecks:         serviceConfig.EnvoyDynamicConfig.HealthChecks,
-		TlsContext:           serviceConfig.EnvoyDynamicConfig.TlsContext,
+	cluster := serviceConfig.EnvoyDynamicConfig.Cluster
+	cluster.Name = serviceConfig.ContainerID
+	cluster.LoadAssignment.ClusterName = serviceConfig.ContainerID
+	switch hostIdentifier := cluster.LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
+	case *envoyEndpointApi.LbEndpoint_Endpoint:
+		switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+		case *envoyCoreApi.Address_SocketAddress:
+			address.SocketAddress.Address = serviceConfig.IP
+			switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+			case *envoyCoreApi.SocketAddress_PortValue:
+				portSpecifier.PortValue = uint32(serviceConfig.Port)
+			}
+		}
 	}
 	return cluster, nil
 }
 func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *ConsulServiceConfig) (*envoyApi.Cluster, error) {
-	http2ProtocolOptions := new(envoyCoreApi.Http2ProtocolOptions)
-	if !serviceConfig.GrpcServiceVerify {
-		http2ProtocolOptions = nil
-	}
-	connectTimeOutInSeconds, err := strconv.Atoi(serviceConfig.EnvoyClusterConnectTimeOutInMs)
-	if err != nil {
-		log.Println("Error while parsing Envoy Cluster Connect Timeout:", err)
-		return nil, err
-	}
 	containerName := getValueFromTag(serviceConfig.Tags, ContainerNameLabel) + NodePortSuffix
 	port, _ := strconv.ParseUint(getopt(serviceConfig.Tags, serviceConfig.IP, "consul.register/nodePort"), 10, 32)
-	cluster := &envoyApi.Cluster{
-		Name:                 containerName,
-		ConnectTimeout:       time.Duration(connectTimeOutInSeconds) * time.Second,
-		ClusterDiscoveryType: &envoyApi.Cluster_Type{Type: envoyApi.Cluster_STRICT_DNS},
-		LbPolicy:             envoyApi.Cluster_ROUND_ROBIN,
-		LoadAssignment: &envoyApi.ClusterLoadAssignment{
-			ClusterName: containerName,
-			Endpoints: []envoyEndpointApi.LocalityLbEndpoints{{
-				LbEndpoints: []envoyEndpointApi.LbEndpoint{{
-					HostIdentifier: &envoyEndpointApi.LbEndpoint_Endpoint{
-						Endpoint: &envoyEndpointApi.Endpoint{
-							Address: &envoyCoreApi.Address{
-								Address: &envoyCoreApi.Address_SocketAddress{
-									SocketAddress: &envoyCoreApi.SocketAddress{
-										Address: getopt(serviceConfig.Tags, serviceConfig.IP, "node"),
-										PortSpecifier: &envoyCoreApi.SocketAddress_PortValue{
-											PortValue: uint32(port),
-										},
-									},
-								},
-							},
-						},
-					},
-				}},
-			}},
-		},
-		Http2ProtocolOptions: http2ProtocolOptions,
-		HealthChecks:         serviceConfig.EnvoyDynamicConfig.HealthChecks,
-		TlsContext:           serviceConfig.EnvoyDynamicConfig.TlsContext,
+	cluster := serviceConfig.EnvoyDynamicConfig.Cluster
+	cluster.Name = containerName
+	cluster.LoadAssignment.ClusterName = containerName
+	switch hostIdentifier := cluster.LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
+	case *envoyEndpointApi.LbEndpoint_Endpoint:
+		switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+		case *envoyCoreApi.Address_SocketAddress:
+			address.SocketAddress.Address = getopt(serviceConfig.Tags, serviceConfig.IP, "node")
+			switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+			case *envoyCoreApi.SocketAddress_PortValue:
+				portSpecifier.PortValue = uint32(port)
+			}
+		}
 	}
 	return cluster, nil
 }
@@ -495,8 +444,34 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 			if strings.EqualFold(r.getServiceNameFromConsul(envoyConfig.Clusters[cluster].Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(envoyConfig.Clusters[cluster].Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
-				envoyConfig.Clusters[cluster].HealthChecks = serviceConfig.EnvoyDynamicConfig.HealthChecks
-				envoyConfig.Clusters[cluster].TlsContext = serviceConfig.EnvoyDynamicConfig.TlsContext
+				clusterName:= envoyConfig.Clusters[cluster].Name
+				ip:=""
+				var port uint32
+				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
+				case *envoyEndpointApi.LbEndpoint_Endpoint:
+					switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+					case *envoyCoreApi.Address_SocketAddress:
+						ip=address.SocketAddress.Address
+						switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+						case *envoyCoreApi.SocketAddress_PortValue:
+							port=portSpecifier.PortValue
+						}
+					}
+				}
+				envoyConfig.Clusters[cluster] = *serviceConfig.EnvoyDynamicConfig.Cluster
+				envoyConfig.Clusters[cluster].Name = clusterName
+				envoyConfig.Clusters[cluster].LoadAssignment.ClusterName = clusterName
+				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
+				case *envoyEndpointApi.LbEndpoint_Endpoint:
+					switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+					case *envoyCoreApi.Address_SocketAddress:
+						address.SocketAddress.Address = ip
+						switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+						case *envoyCoreApi.SocketAddress_PortValue:
+							portSpecifier.PortValue = port
+						}
+					}
+				}
 				log.Printf("Update envoy Cluster config for service %s, cluster %s \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name)
 			}
 		}
