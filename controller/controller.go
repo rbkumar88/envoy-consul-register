@@ -461,7 +461,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 				}
 				log.Printf("vettit:%s,%s,%d,%d",clusterName,ip,port,cluster)
 				envoyConfig.Clusters[cluster] = clusterFromConsulKV
-				envoyConfig.Clusters[cluster].Name = clusterName
+				envoyConfig.Clusters[cluster].Name = clusterName+",hai"
 				envoyConfig.Clusters[cluster].LoadAssignment.ClusterName = clusterName
 				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
 				case *envoyEndpointApi.LbEndpoint_Endpoint:
@@ -477,7 +477,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 				clusterName=""
 				ip=""
 				port=0
-				log.Printf("Update envoy Cluster config for service %s, cluster %s \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name)
+				log.Printf("Update envoy Cluster config for service %s, cluster %s ,config :%+v \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name,envoyConfig.Clusters[cluster])
 			}
 		}
 	}
