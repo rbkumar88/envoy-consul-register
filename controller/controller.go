@@ -439,10 +439,11 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 		}
 	}
 	isClusterFound := false
-	var clusterName,ip string
-	var port uint32
+	clusterFromConsulKV:=*serviceConfig.EnvoyDynamicConfig.Cluster
 	if len(envoyConfig.Clusters) > 0 {
 		for cluster := range envoyConfig.Clusters {
+			var clusterName,ip string
+			var port uint32
 			if strings.EqualFold(r.getServiceNameFromConsul(envoyConfig.Clusters[cluster].Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(envoyConfig.Clusters[cluster].Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
@@ -459,7 +460,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 					}
 				}
 				log.Printf("vettit:%s,%s,%d",clusterName,ip,port)
-				envoyConfig.Clusters[cluster] = *serviceConfig.EnvoyDynamicConfig.Cluster
+				envoyConfig.Clusters[cluster] = clusterFromConsulKV
 				envoyConfig.Clusters[cluster].Name = clusterName
 				envoyConfig.Clusters[cluster].LoadAssignment.ClusterName = clusterName
 				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
@@ -473,9 +474,15 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 						}
 					}
 				}
-				log.Printf("Update envoy Cluster config for service %s, cluster %s,cluster config:%+v \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name,envoyConfig.Clusters[cluster])
+				clusterName=""
+				ip=""
+				port=0
+				log.Printf("Update envoy Cluster config for service %s, cluster %s \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name)
 			}
 		}
+	}
+	for cluster := range envoyConfig.Clusters {
+		log.Printf("Envoy Cluster config : cluster config:%+v \n",  envoyConfig.Clusters[cluster])
 	}
 	if isClusterFound {
 		// Update envoy Route Config
