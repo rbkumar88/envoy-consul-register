@@ -442,41 +442,16 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 	clusterFromConsulKV:=*serviceConfig.EnvoyDynamicConfig.Cluster
 	if len(envoyConfig.Clusters) > 0 {
 		for cluster := range envoyConfig.Clusters {
-			var clusterName,ip string
-			var port uint32
+			var clusterLoadAssignment *envoyApi.ClusterLoadAssignment
+			var clusterName string
 			if strings.EqualFold(r.getServiceNameFromConsul(envoyConfig.Clusters[cluster].Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(envoyConfig.Clusters[cluster].Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
 				clusterName= envoyConfig.Clusters[cluster].Name
-				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
-				case *envoyEndpointApi.LbEndpoint_Endpoint:
-					switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
-					case *envoyCoreApi.Address_SocketAddress:
-						ip=address.SocketAddress.Address
-						switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
-						case *envoyCoreApi.SocketAddress_PortValue:
-							port=portSpecifier.PortValue
-						}
-					}
-				}
-				log.Printf("vettit:%s,%s,%d,%d",clusterName,ip,port,cluster)
+				clusterLoadAssignment = envoyConfig.Clusters[cluster].LoadAssignment
 				envoyConfig.Clusters[cluster] = clusterFromConsulKV
-				envoyConfig.Clusters[cluster].Name = clusterName+",hai"
-				envoyConfig.Clusters[cluster].LoadAssignment.ClusterName = clusterName
-				switch hostIdentifier := envoyConfig.Clusters[cluster].LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
-				case *envoyEndpointApi.LbEndpoint_Endpoint:
-					switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
-					case *envoyCoreApi.Address_SocketAddress:
-						address.SocketAddress.Address = ip
-						switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
-						case *envoyCoreApi.SocketAddress_PortValue:
-							portSpecifier.PortValue = port
-						}
-					}
-				}
-				clusterName=""
-				ip=""
-				port=0
+				envoyConfig.Clusters[cluster].Name = clusterName
+				envoyConfig.Clusters[cluster].LoadAssignment = clusterLoadAssignment
 				log.Printf("Update envoy Cluster config for service %s, cluster %s ,config :%+v \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name,envoyConfig.Clusters[cluster])
 			}
 		}
