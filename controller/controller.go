@@ -459,7 +459,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 						}
 					}
 				}
-				log.Printf("vettit:%s,%s,%d",clusterName,ip,port)
+				log.Printf("vettit:%s,%s,%d,%d",clusterName,ip,port,cluster)
 				envoyConfig.Clusters[cluster] = clusterFromConsulKV
 				envoyConfig.Clusters[cluster].Name = clusterName
 				envoyConfig.Clusters[cluster].LoadAssignment.ClusterName = clusterName
@@ -482,7 +482,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 		}
 	}
 	for cluster := range envoyConfig.Clusters {
-		log.Printf("Envoy Cluster config : cluster config:%+v \n",  envoyConfig.Clusters[cluster])
+		log.Printf("Envoy Cluster config : index :%d, cluster config:%+v \n",  cluster,envoyConfig.Clusters[cluster])
 	}
 	if isClusterFound {
 		// Update envoy Route Config
