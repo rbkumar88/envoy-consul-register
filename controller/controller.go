@@ -85,7 +85,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	u := &jsonpb.Unmarshaler{AnyResolver: resolver}
 	if kv != nil {
 		if err2 := u.Unmarshal(strings.NewReader(string(kv.Value)), envoyConfig); err2 != nil {
-			log.Println("key found : Error while unmarshaling envoy Config :", err2)
+			log.Printf("key %s found : Error while unmarshaling envoy Config :%+v \n", kv.Key,err2)
 			return err2
 		}
 	} else {
