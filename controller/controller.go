@@ -85,7 +85,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 	u := &jsonpb.Unmarshaler{AnyResolver: resolver}
 	if kv != nil {
 		if err2 := u.Unmarshal(strings.NewReader(string(kv.Value)), envoyConfig); err2 != nil {
-			log.Printf("key %s found : Error while unmarshaling envoy Config :%+v \n", kv.Key,err2)
+			log.Printf("key %s found : Error while unmarshaling envoy Config :%+v \n", kv.Key, err2)
 			return err2
 		}
 	} else {
@@ -212,7 +212,7 @@ func (r *ConsulEnvoyAdapter) BuildAndStoreEnvoyConfig(serviceConfig *ConsulServi
 							}
 						}
 						routeSpecifier.RouteConfig.VirtualHosts[0].Routes = append(routeSpecifier.RouteConfig.VirtualHosts[0].Routes, *route)
-						log.Printf("Adding new service %s to envoy Route config,%v", serviceConfig.ContainerID, httpConnectionManager)
+						log.Printf("Adding new service %s to envoy Route config", serviceConfig.ContainerID)
 						x.TypedConfig, _ = types.MarshalAny(httpConnectionManager)
 					case *v2.HttpConnectionManager_Rds:
 					default:
@@ -363,10 +363,10 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithIP(serviceConfig *Consul
 	cluster.LoadAssignment.ClusterName = serviceConfig.ContainerID
 	switch hostIdentifier := cluster.LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
 	case *envoyEndpointApi.LbEndpoint_Endpoint:
-		switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+		switch address := hostIdentifier.Endpoint.Address.Address.(type) {
 		case *envoyCoreApi.Address_SocketAddress:
 			address.SocketAddress.Address = serviceConfig.IP
-			switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+			switch portSpecifier := address.SocketAddress.PortSpecifier.(type) {
 			case *envoyCoreApi.SocketAddress_PortValue:
 				portSpecifier.PortValue = uint32(serviceConfig.Port)
 			}
@@ -382,10 +382,10 @@ func (r *ConsulEnvoyAdapter) buildEnvoyClusterConfigWithHostName(serviceConfig *
 	cluster.LoadAssignment.ClusterName = containerName
 	switch hostIdentifier := cluster.LoadAssignment.Endpoints[0].LbEndpoints[0].HostIdentifier.(type) {
 	case *envoyEndpointApi.LbEndpoint_Endpoint:
-		switch address:=hostIdentifier.Endpoint.Address.Address.(type) {
+		switch address := hostIdentifier.Endpoint.Address.Address.(type) {
 		case *envoyCoreApi.Address_SocketAddress:
 			address.SocketAddress.Address = getopt(serviceConfig.Tags, serviceConfig.IP, "node")
-			switch portSpecifier:= address.SocketAddress.PortSpecifier.(type) {
+			switch portSpecifier := address.SocketAddress.PortSpecifier.(type) {
 			case *envoyCoreApi.SocketAddress_PortValue:
 				portSpecifier.PortValue = uint32(port)
 			}
@@ -439,7 +439,7 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 		}
 	}
 	isClusterFound := false
-	clusterFromConsulKV:=*serviceConfig.EnvoyDynamicConfig.Cluster
+	clusterFromConsulKV := *serviceConfig.EnvoyDynamicConfig.Cluster
 	if len(envoyConfig.Clusters) > 0 {
 		for cluster := range envoyConfig.Clusters {
 			var clusterLoadAssignment *envoyApi.ClusterLoadAssignment
@@ -447,17 +447,17 @@ func (r *ConsulEnvoyAdapter) BuildAndUpdateEnvoyConfig(serviceConfig *ConsulServ
 			if strings.EqualFold(r.getServiceNameFromConsul(envoyConfig.Clusters[cluster].Name, serviceConfig), serviceConfig.ServiceName) ||
 				strings.EqualFold(before(envoyConfig.Clusters[cluster].Name, NodePortSuffix), serviceConfig.ServiceName) {
 				isClusterFound = true
-				clusterName= envoyConfig.Clusters[cluster].Name
+				clusterName = envoyConfig.Clusters[cluster].Name
 				clusterLoadAssignment = envoyConfig.Clusters[cluster].LoadAssignment
 				envoyConfig.Clusters[cluster] = clusterFromConsulKV
 				envoyConfig.Clusters[cluster].Name = clusterName
 				envoyConfig.Clusters[cluster].LoadAssignment = clusterLoadAssignment
-				log.Printf("Update envoy Cluster config for service %s, cluster %s ,config :%+v \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name,envoyConfig.Clusters[cluster])
+				log.Printf("Update envoy Cluster config for service %s, cluster %s ,config :%+v \n", serviceConfig.ServiceName, envoyConfig.Clusters[cluster].Name, envoyConfig.Clusters[cluster])
 			}
 		}
 	}
 	for cluster := range envoyConfig.Clusters {
-		log.Printf("Envoy Cluster config : index :%d, cluster config:%+v \n",  cluster,envoyConfig.Clusters[cluster])
+		log.Printf("Envoy Cluster config : index :%d, cluster config:%+v \n", cluster, envoyConfig.Clusters[cluster])
 	}
 	if isClusterFound {
 		// Update envoy Route Config
@@ -743,13 +743,16 @@ func (r *ConsulEnvoyAdapter) updateEnvoyServiceConfigFromConsulKV(serviceConfig 
 	if val := consulServiceName; val != "" {
 		kv, _, _ := r.client.KV().Get(val, nil)
 		if kv != nil {
+			log.Printf("Service config for %s found \n", val)
 			envoyDynamicConfig := &EnvoyServiceConfig{}
 			u := &jsonpb.Unmarshaler{}
 			err := u.Unmarshal(strings.NewReader(string(kv.Value)), envoyDynamicConfig)
 			if err != nil {
-				return fmt.Errorf("Error while parsing service config: %q ", err)
+				return fmt.Errorf("Error while parsing service config for %s: %q ", val, err)
 			}
 			serviceConfig.EnvoyDynamicConfig = envoyDynamicConfig
+		} else {
+			log.Printf("Service config for %s not found \n", val)
 		}
 	}
 	return nil
